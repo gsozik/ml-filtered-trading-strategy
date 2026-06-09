@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+
 from ta import TechnicalAnalysisPipeline
 
 from backtest import VectorBTBacktester

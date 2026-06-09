@@ -3,21 +3,18 @@ from pathlib import Path
 
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.append(str(PROJECT_ROOT))
-
 from data.ohlcv.bybit_loader import BybitOHLCVLoader
 from ta import TechnicalAnalysisPipeline
 from strategy import RobustTrendStrategy
 from backtest import VectorBTBacktester
 
 
-SYMBOL = "TON/USDT"
+SYMBOL = "BTC/USDT"
 TIMEFRAME = "4h"
-START = "2024-01-01"
-END = "2024-12-31"
+START = "2020-01-01"
+END = "2022-12-31"
 
-SAVE_PATH = PROJECT_ROOT / "storage" / "TON_USDT_4h_2024.csv"
+SAVE_PATH = "storage/BTC_USDT_4h_2020_2022.csv"
 
 
 def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:

@@ -7,16 +7,19 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(PROJECT_ROOT))
 
 from ta import TechnicalAnalysisPipeline
-from ml import WalkForwardMLFilter
+from ml import WalkForwardTradeQualityFilter
 from strategy import BuyAndHoldStrategy, RobustTrendStrategy
 from backtest import VectorBTBacktester
 
 
-DATA_PATH = PROJECT_ROOT / "storage" / "ETH_USDT_4h_2024.csv"
+DATA_PATH = PROJECT_ROOT / "storage" / "TON_USDT_4h_2022-2025.csv"
 
 TRAIN_WINDOW = 1000
 TEST_WINDOW = 100
 WINDOW_MODE = "expanding"
+
+PROFIT_HORIZON = 6
+MIN_PROFIT = 0.003
 
 MODEL_NAMES = [
     "random_forest",
@@ -29,22 +32,52 @@ def load_data(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
 
     if "timestamp" in df.columns:
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
         df = df.set_index("timestamp")
 
     return df.sort_index()
 
 
-def create_ml_filter(model_name: str) -> WalkForwardMLFilter:
-    return WalkForwardMLFilter(
+def create_ml_filter(model_name: str) -> WalkForwardTradeQualityFilter:
+    return WalkForwardTradeQualityFilter(
         model_name=model_name,
         train_window=TRAIN_WINDOW,
         test_window=TEST_WINDOW,
-        horizon = 1,
-        long_threshold=0.003,
-        short_threshold=-0.003,
+        profit_horizon=PROFIT_HORIZON,
+        min_profit=MIN_PROFIT,
         window_mode=WINDOW_MODE,
     )
+
+
+def print_data_info(df_features: pd.DataFrame, test_df: pd.DataFrame) -> None:
+    print("\nDATA INFO")
+    print("=" * 100)
+    print(f"Full data rows: {len(df_features)}")
+    print(f"Test data rows: {len(test_df)}")
+    print(f"Full start: {df_features.index.min()}")
+    print(f"Full end:   {df_features.index.max()}")
+    print(f"Test start: {test_df.index.min()}")
+    print(f"Test end:   {test_df.index.max()}")
+    print(f"Train window: {TRAIN_WINDOW}")
+    print(f"Test window:  {TEST_WINDOW}")
+    print(f"Window mode:  {WINDOW_MODE}")
+    print(f"Profit horizon: {PROFIT_HORIZON}")
+    print(f"Min profit: {MIN_PROFIT}")
+
+
+def print_windows(reference_filter: WalkForwardTradeQualityFilter) -> None:
+    print("\nWALK-FORWARD WINDOWS")
+    print("=" * 100)
+
+    windows = reference_filter.get_windows()
+
+    if windows.empty:
+        print("No windows")
+        return
+
+    print(windows.head().to_string(index=False))
+    print("...")
+    print(windows.tail().to_string(index=False))
 
 
 def print_orders_debug(strategy, df: pd.DataFrame, title: str) -> None:
@@ -58,34 +91,59 @@ def print_orders_debug(strategy, df: pd.DataFrame, title: str) -> None:
     print(f"Short exits:   {int(orders.short_exits.sum())}")
 
 
+def print_ml_debug(strategy, df_ml: pd.DataFrame, model_name: str) -> None:
+    orders = strategy.generate_orders(df_ml)
+
+    long_before = int(orders.entries.sum())
+    short_before = int(orders.short_entries.sum())
+
+    long_allowed = int((orders.entries & (df_ml["ml_filter"] == 1)).sum())
+    short_allowed = int((orders.short_entries & (df_ml["ml_filter"] == -1)).sum())
+
+    print(f"\nML FILTER DEBUG: {model_name}")
+    print("-" * (17 + len(model_name)))
+    print(f"TA long entries before ML:   {long_before}")
+    print(f"TA short entries before ML:  {short_before}")
+    print(f"ML allowed long entries:     {long_allowed}")
+    print(f"ML allowed short entries:    {short_allowed}")
+    print("ML filter distribution:")
+    print(df_ml["ml_filter"].value_counts().sort_index().to_string())
+
+
 def build_result_row(
     name: str,
     backtest_result: dict,
     ml_metrics: dict | None = None,
 ) -> dict:
-    m = backtest_result["metrics"]
+    metrics = backtest_result["metrics"]
 
     row = {
         "name": name,
-        "final_value": m.get("final_value"),
-        "pnl": m.get("total_pnl"),
-        "return_%": m.get("total_return_pct"),
-        "max_dd_%": m.get("max_drawdown_pct"),
-        "sharpe": m.get("sharpe_ratio"),
-        "sortino": m.get("sortino_ratio"),
-        "calmar": m.get("calmar_ratio"),
-        "win_rate_%": m.get("win_rate_pct"),
-        "profit_factor": m.get("profit_factor"),
-        "trades": m.get("total_trades"),
-        "closed_trades": m.get("closed_trades"),
-        "open_trades": m.get("open_trades"),
+        "final_value": metrics.get("final_value"),
+        "pnl": metrics.get("total_pnl"),
+        "return_%": metrics.get("total_return_pct"),
+        "max_dd_%": metrics.get("max_drawdown_pct"),
+        "sharpe": metrics.get("sharpe_ratio"),
+        "sortino": metrics.get("sortino_ratio"),
+        "calmar": metrics.get("calmar_ratio"),
+        "win_rate_%": metrics.get("win_rate_pct"),
+        "profit_factor": metrics.get("profit_factor"),
+        "trades": metrics.get("total_trades"),
+        "closed_trades": metrics.get("closed_trades"),
+        "open_trades": metrics.get("open_trades"),
         "ml_accuracy": None,
-        "ml_f1_macro": None,
+        "ml_precision": None,
+        "ml_recall": None,
+        "ml_f1": None,
+        "ml_train_samples": None,
     }
 
     if ml_metrics is not None:
         row["ml_accuracy"] = ml_metrics.get("accuracy")
-        row["ml_f1_macro"] = ml_metrics.get("f1_macro")
+        row["ml_precision"] = ml_metrics.get("precision")
+        row["ml_recall"] = ml_metrics.get("recall")
+        row["ml_f1"] = ml_metrics.get("f1")
+        row["ml_train_samples"] = ml_metrics.get("predicted_trade_samples")
 
     return row
 
@@ -103,8 +161,8 @@ def print_result_table(result_table: pd.DataFrame) -> None:
         "win_rate_%",
         "profit_factor",
         "trades",
-        "ml_accuracy",
-        "ml_f1_macro",
+        "closed_trades",
+        "open_trades",
     ]
 
     table = result_table[display_cols].copy()
@@ -156,47 +214,37 @@ def main():
         slippage=0.0008,
         freq="4h",
         result_dir="backtest_result",
+        shift_orders=True,
     )
 
-    # Reference ML нужен только для определения общего out-of-sample участка.
+    # Reference-фильтр нужен только для получения общего out-of-sample периода.
     reference_filter = create_ml_filter("random_forest")
-    df_reference = reference_filter.transform(df_features)
+    df_reference = reference_filter.transform(
+        df=df_features,
+        strategy=ta_strategy,
+    )
 
     test_df = df_reference[df_reference["is_ml_predicted"] == 1].copy()
 
-    print("\nDATA INFO")
-    print("=" * 100)
-    print(f"Full data rows: {len(df_features)}")
-    print(f"Test data rows: {len(test_df)}")
-    print(f"Test start: {test_df.index.min()}")
-    print(f"Test end:   {test_df.index.max()}")
-    print(f"Train window: {TRAIN_WINDOW}")
-    print(f"Test window:  {TEST_WINDOW}")
-    print(f"Window mode:  {WINDOW_MODE}")
-
-    print("\nWALK-FORWARD WINDOWS")
-    print("=" * 100)
-    windows = reference_filter.get_windows()
-    print(windows.head().to_string(index=False))
-    print("...")
-    print(windows.tail().to_string(index=False))
+    print_data_info(df_features=df_features, test_df=test_df)
+    print_windows(reference_filter)
 
     print_orders_debug(
-        ta_strategy,
-        df_features,
-        "RAW TA STRATEGY ORDERS ON FULL DATA",
+        strategy=ta_strategy,
+        df=df_features,
+        title="RAW TA STRATEGY ORDERS ON FULL DATA",
     )
 
     print_orders_debug(
-        ta_strategy,
-        test_df,
-        "RAW TA STRATEGY ORDERS ON TEST DATA",
+        strategy=ta_strategy,
+        df=test_df,
+        title="RAW TA STRATEGY ORDERS ON TEST DATA",
     )
 
     rows = []
     saved_results = {}
 
-    # 1. Buy&Hold на том же out-of-sample участке
+    # 1. Buy&Hold на том же out-of-sample периоде.
     bh_result = backtester.run(
         df=test_df,
         strategy=bh_strategy,
@@ -211,10 +259,9 @@ def main():
             backtest_result=bh_result,
         )
     )
-
     saved_results["Buy&Hold"] = bh_result
 
-    # 2. Базовая TA-стратегия без ML
+    # 2. Базовая TA-стратегия без ML.
     base_result = backtester.run(
         df=test_df,
         strategy=ta_strategy,
@@ -229,28 +276,44 @@ def main():
             backtest_result=base_result,
         )
     )
-
     saved_results["TA Strategy"] = base_result
 
-    # 3. TA-стратегия + ML-фильтр для каждой модели
+    # 3. TA-стратегия + ML trade-quality фильтр.
     for model_name in MODEL_NAMES:
-        print(f"\nRunning ML model: {model_name}")
+        print(f"\nRunning ML trade-quality model: {model_name}")
 
         ml_filter = create_ml_filter(model_name)
-        df_ml = ml_filter.transform(df_features)
+
+        df_ml = ml_filter.transform(
+            df=df_features,
+            strategy=ta_strategy,
+        )
 
         test_df_ml = df_ml[df_ml["is_ml_predicted"] == 1].copy()
 
+        print("ML metrics:")
+        print(ml_filter.get_metrics())
+
+        print_ml_debug(
+            strategy=ta_strategy,
+            df_ml=test_df_ml,
+            model_name=model_name,
+        )
+
+        # Для trade-quality фильтра используем confirm:
+        # ml_filter = 1 разрешает long entry,
+        # ml_filter = -1 разрешает short entry,
+        # ml_filter = 0 запрещает вход.
         ml_result = backtester.run(
             df=test_df_ml,
             strategy=ta_strategy,
             use_ml_filter=True,
             ml_filter_mode="confirm",
             save_plots=True,
-            plot_name=f"{ta_strategy.name}_{model_name}_confirm",
+            plot_name=f"{ta_strategy.name}_{model_name}_trade_quality",
         )
 
-        result_name = f"TA + {model_name}"
+        result_name = f"TA + {model_name} trade-quality"
 
         rows.append(
             build_result_row(
@@ -259,25 +322,14 @@ def main():
                 ml_metrics=ml_filter.get_metrics(),
             )
         )
-
         saved_results[result_name] = ml_result
 
-        print("ML metrics:")
-        print(ml_filter.get_metrics())
-
-        print("ML filter distribution on test:")
-        print(
-            test_df_ml["ml_filter"]
-            .value_counts()
-            .sort_index()
-            .to_string()
-        )
-
     result_table = pd.DataFrame(rows)
+
     print_result_table(result_table)
 
     for name, result in saved_results.items():
-        print_trade_tail(name, result, n=5)
+        print_trade_tail(name=name, result=result, n=5)
 
     output_dir = PROJECT_ROOT / "backtest_result"
     output_dir.mkdir(parents=True, exist_ok=True)
