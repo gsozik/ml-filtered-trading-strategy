@@ -1,7 +1,5 @@
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 
 
 def create_model(
@@ -15,18 +13,15 @@ def create_model(
     if model_name == "logistic_regression":
         default_params = {
             "C": 1.0,
+            "penalty": "l2",
+            "solver": "lbfgs",
             "max_iter": 3000,
             "class_weight": "balanced",
             "random_state": random_state,
         }
         default_params.update(params)
 
-        return Pipeline(
-            steps=[
-                ("scaler", StandardScaler()),
-                ("model", LogisticRegression(**default_params)),
-            ]
-        )
+        return LogisticRegression(**default_params)
 
     if model_name == "random_forest":
         default_params = {
@@ -44,7 +39,10 @@ def create_model(
         return RandomForestClassifier(**default_params)
 
     if model_name == "catboost":
-        from catboost import CatBoostClassifier
+        try:
+            from catboost import CatBoostClassifier
+        except ImportError as exc:
+            raise ImportError("CatBoost is not installed. Run: pip install catboost") from exc
 
         default_params = {
             "iterations": 300,
@@ -60,4 +58,7 @@ def create_model(
 
         return CatBoostClassifier(**default_params)
 
-    raise ValueError(f"Unknown model_name: {model_name}")
+    raise ValueError(
+        f"Unknown model_name='{model_name}'. "
+        "Available: logistic_regression, random_forest, catboost"
+    )

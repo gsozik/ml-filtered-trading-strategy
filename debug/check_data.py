@@ -10,11 +10,11 @@ from backtest import VectorBTBacktester
 
 
 SYMBOL = "BTC/USDT"
-TIMEFRAME = "4h"
-START = "2020-01-01"
+TIMEFRAME = "1h"
+START = "2021-01-01"
 END = "2022-12-31"
 
-SAVE_PATH = "storage/BTC_USDT_4h_2020_2022.csv"
+SAVE_PATH = "storage/BTC_USDT_1h_2021_2022.csv"
 
 
 def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:

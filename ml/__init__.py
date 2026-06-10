@@ -5,7 +5,7 @@
 from ml.base import BaseMLFilter
 from ml.direction_filter import DirectionMLFilter
 
-from ml.lstm_filter import WalkForwardLSTMPriceFilter
+from ml.lstm_direction_filter import LSTMDirectionFilter
 
 __all__ = [
     #"WalkForwardMLFilter",
@@ -13,5 +13,5 @@ __all__ = [
     #"WalkForwardRegimeFilter",    
     "BaseMLFilter",
     "DirectionMLFilter",
-    "WalkForwardLSTMPriceFilter",
+    "LSTMDirectionFilter",
 ]

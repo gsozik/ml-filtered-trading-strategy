@@ -3,6 +3,9 @@ from pathlib import Path
 
 import pandas as pd
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(PROJECT_ROOT))
+
 from ta import TechnicalAnalysisPipeline
 
 from backtest import VectorBTBacktester
@@ -12,10 +15,10 @@ from strategy import DonchianBreakoutStrategy
 from strategy import RSIReversalStrategy
 from strategy import MACDTrendStrategy
 
-from ml import DirectionMLFilter
+from ml import DirectionMLFilter, LSTMDirectionFilter
 
 
-DATA_PATH = "storage/BTC_USDT_4h_2020_2022.csv"
+DATA_PATH = "storage/PEPE_USDT_4h_2024_2025.csv"
 
 
 df = pd.read_csv(DATA_PATH)
@@ -30,6 +33,7 @@ strategy = RobustTrendStrategy()
 #strategy = RSIReversalStrategy(rsi_col="rsi_14")
 #strategy = MACDTrendStrategy(macd_col="macd", signal_col="macd_signal")
 
+# инициализация бэктеста с параметрами
 backtester = VectorBTBacktester(
     init_cash=10_000,
     fees=0.001,
@@ -42,23 +46,32 @@ backtester = VectorBTBacktester(
 train_df = df.iloc[:1000].copy()
 test_df = df.iloc[1000:].copy()
 
-catboost_filter = DirectionMLFilter(
-    model_name="catboost",
-    horizon=1,
-    long_threshold=0.003,
-    short_threshold=-0.003,
-    use_raw_ohlcv=False,
-)
-catboost_filter.fit(train_df)
-test_df["catboost_filter"] = catboost_filter.predict_filter(test_df)
+lstm_filter = LSTMDirectionFilter(
+    model_name= 'lstm',
+    horizon=32,
+    long_threshold=0.02,
+    short_threshold=-0.02,
 
+    tune=True,
+    n_trials=100,
+    val_size=0.2,
+    normalizer="auto",
+
+    random_state=42,
+    verbose=True,
+)
+
+lstm_filter.fit(train_df)
+test_df["lstm_filter"] = lstm_filter.predict_filter(test_df)
+
+# Запуск бекстеста
 result = backtester.run_comparison(
-    df=df,
+    df=test_df,
     strategy=strategy,
     strategy_name=strategy.name,
     include_buy_and_hold=True,
     include_base_strategy=True,
-    ml_filters={"catboost": test_df["catboost_filter"]},
+    ml_filters={"lstm": test_df["lstm_filter"]},
     entry_mode="strict"
 )
 
