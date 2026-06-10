@@ -5,3 +5,4 @@ __pycache__/
 catboost_info/
 backtest_result/
 storage/
+backtest_result/
